@@ -1,0 +1,355 @@
+#!/bin/bash
+# Claude Code Enforcement System Bootstrap
+# Version: 1.0.0
+#
+# Universal installer for Claude Code project enforcement hooks
+# Works with ANY project - creates template hooks that you customize
+#
+# Usage:
+#   cd /path/to/your/project
+#   /path/to/bootstrap-enforcement.sh
+#
+# What it does:
+#   - Creates .claude/ directory in current project
+#   - Installs 4 template hooks (pre-write, post-write, pre-stop, session-start)
+#   - Hooks start as stubs (just log, no enforcement)
+#   - Add project-specific rules incrementally
+
+set -e
+
+# Determine project root (where script is run from, not where it lives)
+PROJECT_ROOT="$(pwd)"
+CLAUDE_DIR="$PROJECT_ROOT/.claude"
+HOOKS_DIR="$CLAUDE_DIR/hooks"
+
+# Get the directory where this script lives (for copying templates)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TEMPLATES_DIR="$SCRIPT_DIR/templates"
+
+echo "═══════════════════════════════════════════════════════════"
+echo "  Claude Code Enforcement System Bootstrap"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+echo "  Project: $PROJECT_ROOT"
+echo "  Templates: $TEMPLATES_DIR"
+echo ""
+
+# Check if .claude/ already exists
+if [ -d "$CLAUDE_DIR" ]; then
+  echo "⚠️  WARNING: .claude/ directory already exists"
+  read -p "   Overwrite? (y/N): " -n 1 -r
+  echo
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "❌ Aborted"
+    exit 1
+  fi
+fi
+
+# Create directory structure
+echo "📁 Creating directory structure..."
+mkdir -p "$HOOKS_DIR"
+
+# Create settings.json with hook configuration
+echo "⚙️  Creating settings.json..."
+cat > "$CLAUDE_DIR/settings.json" <<'EOF'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-write.sh \"$TOOL_NAME\" \"$TOOL_ARGS_0\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-write.sh \"$TOOL_NAME\" \"$TOOL_ARGS_0\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-stop.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+
+# Copy or create hook templates
+echo "🔧 Installing hook templates..."
+
+if [ -d "$TEMPLATES_DIR" ]; then
+  # Copy from templates directory
+  cp "$TEMPLATES_DIR/pre-write.sh" "$HOOKS_DIR/"
+  cp "$TEMPLATES_DIR/post-write.sh" "$HOOKS_DIR/"
+  cp "$TEMPLATES_DIR/pre-stop.sh" "$HOOKS_DIR/"
+  cp "$TEMPLATES_DIR/session-start.sh" "$HOOKS_DIR/"
+else
+  # Fallback: create inline templates
+  echo "⚠️  Templates directory not found, creating inline templates"
+
+  cat > "$HOOKS_DIR/pre-write.sh" <<'HOOK_EOF'
+#!/bin/bash
+# PreToolUse Hook: Runs BEFORE Claude writes/edits files
+# Exit 0 = allow operation
+# Exit 2 = block operation (Claude gets feedback and must adjust)
+
+TOOL_NAME="$1"
+FILE_PATH="$2"
+
+echo "🔍 [PRE-WRITE] Claude wants to $TOOL_NAME: $FILE_PATH" >&2
+
+# ============================================================
+# ADD YOUR ENFORCEMENT RULES HERE
+# ============================================================
+#
+# Example: Block specific file patterns
+# if [[ "$FILE_PATH" =~ forbidden-pattern\.css$ ]]; then
+#   echo "❌ BLOCKED: No CSS files allowed" >&2
+#   exit 2
+# fi
+#
+# Example: Block specific directories
+# if [[ "$FILE_PATH" =~ ^src/forbidden/ ]]; then
+#   echo "❌ BLOCKED: Cannot write to src/forbidden/" >&2
+#   exit 2
+# fi
+
+echo "✅ [PRE-WRITE] No violations detected - allowing operation" >&2
+exit 0
+HOOK_EOF
+
+  cat > "$HOOKS_DIR/post-write.sh" <<'HOOK_EOF'
+#!/bin/bash
+# PostToolUse Hook: Runs AFTER Claude writes/edits files
+# Exit 0 = keep the write
+# Exit 2 = undo the write
+
+TOOL_NAME="$1"
+FILE_PATH="$2"
+
+echo "📝 [POST-WRITE] Claude completed $TOOL_NAME: $FILE_PATH" >&2
+
+# ============================================================
+# ADD YOUR VALIDATION RULES HERE
+# ============================================================
+#
+# Example: Check file content
+# if grep -q "FORBIDDEN_PATTERN" "$FILE_PATH" 2>/dev/null; then
+#   echo "❌ BLOCKED: File contains forbidden pattern" >&2
+#   exit 2
+# fi
+#
+# Example: Run linter
+# if [[ "$FILE_PATH" =~ \.tsx?$ ]]; then
+#   if ! eslint "$FILE_PATH" --quiet 2>/dev/null; then
+#     echo "⚠️  WARNING: ESLint errors detected" >&2
+#   fi
+# fi
+
+echo "✅ [POST-WRITE] Validation passed" >&2
+exit 0
+HOOK_EOF
+
+  cat > "$HOOKS_DIR/pre-stop.sh" <<'HOOK_EOF'
+#!/bin/bash
+# Stop Hook: Runs when Claude tries to stop/complete
+# Exit 0 = allow stopping
+# Exit 2 = block stopping (Claude must continue)
+
+echo "🛑 [PRE-STOP] Claude is trying to stop..." >&2
+
+# ============================================================
+# ADD YOUR FINAL VALIDATION HERE
+# ============================================================
+#
+# Example: Check for uncommitted changes
+# if ! git diff --quiet 2>/dev/null; then
+#   echo "⚠️  WARNING: Uncommitted changes exist" >&2
+# fi
+#
+# Example: Run tests
+# if command -v npm &> /dev/null; then
+#   if ! npm test --silent 2>/dev/null; then
+#     echo "❌ BLOCKED: Tests failing - fix before stopping" >&2
+#     exit 2
+#   fi
+# fi
+
+echo "✅ [PRE-STOP] Validation passed - allowing stop" >&2
+exit 0
+HOOK_EOF
+
+  cat > "$HOOKS_DIR/session-start.sh" <<'HOOK_EOF'
+#!/bin/bash
+# SessionStart Hook: Runs when Claude Code session starts
+# Output (stdout) gets injected into Claude's context
+
+echo "🚀 [SESSION-START] Enforcement system loading..." >&2
+
+# ============================================================
+# ADD CONTEXT INJECTION HERE
+# ============================================================
+#
+# Example: Display critical rules
+# cat <<'EOF'
+# ⚠️ PROJECT STANDARDS:
+# 1. Rule one
+# 2. Rule two
+# EOF
+#
+# Example: Check environment
+# if ! command -v node &> /dev/null; then
+#   echo "⚠️  WARNING: Node.js not installed" >&2
+# fi
+
+# Output goes into Claude's context (stdout):
+echo "Enforcement hooks are active."
+echo "Customize rules in .claude/hooks/*.sh"
+HOOK_EOF
+fi
+
+# Make hooks executable
+chmod +x "$HOOKS_DIR"/*.sh
+
+# Create README
+echo "📝 Creating README..."
+cat > "$CLAUDE_DIR/README.md" <<'EOF'
+# Claude Code Enforcement System
+
+Installed by: claude-code-enforcement/bootstrap-enforcement.sh
+Installation date: $(date +%Y-%m-%d)
+
+## What This Is
+
+Hooks that run during Claude Code sessions to enforce project standards.
+
+## Hooks Installed
+
+### 1. PreToolUse Hook (`pre-write.sh`)
+- **When**: BEFORE Claude writes/edits files
+- **Purpose**: Block non-compliant operations before they happen
+- **Exit 2**: Blocks the write, Claude gets feedback
+- **Exit 0**: Allows the write
+
+### 2. PostToolUse Hook (`post-write.sh`)
+- **When**: AFTER Claude writes/edits files
+- **Purpose**: Validate written files, can undo if needed
+- **Exit 2**: Undoes the write
+- **Exit 0**: Keeps the write
+
+### 3. Stop Hook (`pre-stop.sh`)
+- **When**: When Claude tries to stop/complete
+- **Purpose**: Final validation before finishing
+- **Exit 2**: Prevents stopping, Claude continues
+- **Exit 0**: Allows stopping
+
+### 4. SessionStart Hook (`session-start.sh`)
+- **When**: At start of conversation
+- **Purpose**: Initialize environment, inject critical rules
+- **Output**: Goes into Claude's context
+
+## Quick Start
+
+1. **Restart Claude Code** (required to load hooks)
+2. **Test**: Edit a file - you'll see hook messages
+3. **Customize**: Add rules to `.claude/hooks/*.sh`
+
+## Adding Rules
+
+Edit hook scripts to add project-specific validation:
+
+```bash
+# Example in pre-write.sh:
+if [[ "$FILE_PATH" =~ \.css$ ]]; then
+  echo "❌ BLOCKED: No CSS files" >&2
+  exit 2
+fi
+```
+
+## Testing Hooks
+
+Test hooks manually:
+```bash
+bash .claude/hooks/pre-write.sh Write path/to/file.txt
+echo $?  # 0 = allowed, 2 = blocked
+```
+
+## Debugging
+
+- Hook output appears in Claude Code interface
+- Check `~/.claude/logs/` for detailed logs
+- Add `echo` statements to hooks for debugging
+
+## Disable Temporarily
+
+Rename `settings.json`:
+```bash
+mv .claude/settings.json .claude/settings.json.disabled
+```
+
+Restart Claude Code to take effect.
+
+## Documentation
+
+Full documentation: https://github.com/YOUR-USERNAME/claude-code-enforcement
+EOF
+
+# Create .gitignore
+cat > "$CLAUDE_DIR/.gitignore" <<'EOF'
+# Commit hooks to share enforcement with team
+# Or uncomment to keep hooks private:
+# *
+# !.gitignore
+# !README.md
+EOF
+
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo "✅ Installation Complete!"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+echo "📁 Created:"
+echo "   $CLAUDE_DIR/settings.json"
+echo "   $CLAUDE_DIR/hooks/pre-write.sh"
+echo "   $CLAUDE_DIR/hooks/post-write.sh"
+echo "   $CLAUDE_DIR/hooks/pre-stop.sh"
+echo "   $CLAUDE_DIR/hooks/session-start.sh"
+echo "   $CLAUDE_DIR/README.md"
+echo ""
+echo "🔄 NEXT STEP: Restart Claude Code to load hooks"
+echo ""
+echo "🧪 Then test:"
+echo "   1. Ask Claude to edit a file"
+echo "   2. Watch for hook messages in output"
+echo "   3. If you see messages → hooks are working!"
+echo ""
+echo "📖 Customize:"
+echo "   Edit .claude/hooks/*.sh to add project-specific rules"
+echo "   See examples: $SCRIPT_DIR/examples/"
+echo ""
