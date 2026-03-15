@@ -4,8 +4,9 @@
 # Purpose: Prevent common security issues and code quality problems
 # Usage: Copy these rules into your .claude/hooks/pre-write.sh or post-write.sh
 
-TOOL_NAME="$1"
-FILE_PATH="$2"
+INPUT=$(cat)
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 
 echo "🔍 [SECURITY] Checking: $FILE_PATH" >&2
 

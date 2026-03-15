@@ -290,28 +290,41 @@ cd ~/Documents/Projects/claude-code-enforcement
 
 Use this to test that bootstrap works correctly.
 
-## Known Issues and TODOs
+## Self-Enforcement (Dogfooding)
 
-### Example Files Need Updating
+This repository enforces its own standards using the enforcement system it provides.
 
-Files in `examples/` still use old argument format:
-```bash
-TOOL_NAME="$1"  # OLD, WRONG
-FILE_PATH="$2"  # OLD, WRONG
-```
+### Enforcement Rules Active
 
-Should use JSON stdin format:
-```bash
-INPUT=$(cat)
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
-```
+**`.claude/hooks/pre-write.sh` blocks:**
 
-**When updating examples**: Test each one manually to ensure they still work.
+1. **Old hook argument format** in any `.sh` file in:
+   - `examples/`
+   - `templates/`
+   - `.claude/hooks/`
+
+   If you try to write `TOOL_NAME="$1"` or `FILE_PATH="$2"`, you'll get:
+   ```
+   ❌ BLOCKED: Old hook argument format detected
+
+   ❌ WRONG (old format):
+      TOOL_NAME="$1"
+      FILE_PATH="$2"
+
+   ✅ CORRECT (JSON stdin format):
+      INPUT=$(cat)
+      TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
+      FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+   ```
+
+2. **Documentation referencing old format as correct**
+   - Prevents markdown files from showing old format as current best practice
+
+**Result**: Impossible to accidentally create hooks with wrong format in this repo.
 
 ### Template Consistency
 
-Ensure `templates/*.sh` files match inline templates in `bootstrap-enforcement.sh`.
+All templates and examples use consistent JSON stdin format. Bootstrap script's inline templates match `templates/*.sh` files exactly.
 
 ## Testing Checklist
 

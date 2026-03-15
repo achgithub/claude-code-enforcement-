@@ -5,8 +5,9 @@
 # Use case: Solo developer with editing machine + build server
 # Usage: Copy these rules into your .claude/hooks/pre-write.sh
 
-TOOL_NAME="$1"
-FILE_PATH="$2"
+INPUT=$(cat)
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 
 echo "🔍 [PRE-WRITE] Workflow enforcement checking: $FILE_PATH" >&2
 
