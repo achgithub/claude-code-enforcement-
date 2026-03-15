@@ -35,23 +35,141 @@ echo "  Templates: $TEMPLATES_DIR"
 echo ""
 
 # Check if .claude/ already exists
+EXISTING_SETUP=false
 if [ -d "$CLAUDE_DIR" ]; then
-  echo "⚠️  WARNING: .claude/ directory already exists"
-  read -p "   Overwrite? (y/N): " -n 1 -r
+  EXISTING_SETUP=true
+  echo "⚠️  EXISTING .claude/ directory detected"
+  echo ""
+  echo "Options:"
+  echo "  1) Add enforcement hooks to existing setup (recommended)"
+  echo "  2) Overwrite everything (destroys existing settings)"
+  echo "  3) Abort"
+  echo ""
+  read -p "Choose [1/2/3]: " -n 1 -r
   echo
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "❌ Aborted"
-    exit 1
-  fi
+
+  case $REPLY in
+    1)
+      echo "✓ Adding enforcement hooks to existing setup..."
+      ;;
+    2)
+      echo "⚠️  This will DELETE your existing .claude/ directory!"
+      read -p "   Are you sure? (y/N): " -n 1 -r
+      echo
+      if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "❌ Aborted"
+        exit 1
+      fi
+      rm -rf "$CLAUDE_DIR"
+      EXISTING_SETUP=false
+      ;;
+    *)
+      echo "❌ Aborted"
+      exit 1
+      ;;
+  esac
 fi
 
 # Create directory structure
 echo "📁 Creating directory structure..."
 mkdir -p "$HOOKS_DIR"
+mkdir -p "$CLAUDE_DIR/logs"
 
-# Create settings.json with hook configuration
-echo "⚙️  Creating settings.json..."
-cat > "$CLAUDE_DIR/settings.json" <<'EOF'
+# Create or update settings.json
+if [ "$EXISTING_SETUP" = true ] && [ -f "$CLAUDE_DIR/settings.json" ]; then
+  echo "⚙️  Merging enforcement hooks into existing settings.json..."
+
+  # Backup existing settings
+  cp "$CLAUDE_DIR/settings.json" "$CLAUDE_DIR/settings.json.backup"
+  echo "   (Backup saved to settings.json.backup)"
+
+  # Check if settings.json already has hooks section
+  if grep -q '"hooks"' "$CLAUDE_DIR/settings.json"; then
+    echo ""
+    echo "⚠️  WARNING: settings.json already has hooks configured"
+    echo "   Manual merge required. Enforcement hook templates are in:"
+    echo "   $HOOKS_DIR/"
+    echo ""
+    echo "   Add these to your settings.json hooks section:"
+    echo "   - PermissionRequest: permission-request.sh"
+    echo "   - PreToolUse: pre-write.sh"
+    echo "   - PostToolUse: post-write.sh"
+    echo "   - Stop: pre-stop.sh"
+    echo "   - SessionStart: session-start.sh"
+    echo ""
+    SKIP_SETTINGS=true
+  else
+    # Add hooks section to existing settings.json
+    # Remove closing brace, add hooks, add closing brace
+    sed -i.tmp '$ s/}$/,/' "$CLAUDE_DIR/settings.json"
+    cat >> "$CLAUDE_DIR/settings.json" <<'HOOKS_EOF'
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-write.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-write.sh"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/permission-request.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-stop.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [],
+    "ask": [],
+    "deny": []
+  }
+}
+HOOKS_EOF
+    rm -f "$CLAUDE_DIR/settings.json.tmp"
+  fi
+else
+  # Create new settings.json
+  echo "⚙️  Creating settings.json..."
+  cat > "$CLAUDE_DIR/settings.json" <<'EOF'
 {
   "hooks": {
     "PreToolUse": [
@@ -114,9 +232,20 @@ cat > "$CLAUDE_DIR/settings.json" <<'EOF'
   }
 }
 EOF
+fi
 
 # Copy or create hook templates
 echo "🔧 Installing hook templates..."
+
+# Skip copying templates if we're merging and hooks already exist
+if [ "$EXISTING_SETUP" = true ] && [ -n "$SKIP_SETTINGS" ]; then
+  echo "⚠️  Skipping template installation (manual merge required)"
+  echo "   Copy enforcement hooks from: $TEMPLATES_DIR/"
+  echo "   To: $HOOKS_DIR/"
+  echo ""
+  echo "   Then update settings.json to reference them"
+  exit 0
+fi
 
 if [ -d "$TEMPLATES_DIR" ]; then
   # Copy from templates directory
