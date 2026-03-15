@@ -1,3 +1,6 @@
+# Logs are local - don't commit
+logs/
+
 # Commit hooks to share enforcement with team
 # Or uncomment to keep hooks private:
 # *

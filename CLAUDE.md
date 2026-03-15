@@ -67,10 +67,14 @@ FILE_PATH="$2"
 |------|------|---------|------------|----------------|
 | **PreToolUse** | BEFORE Write/Edit | Prevent violations proactively | ✅ Yes | stderr → Claude sees it |
 | **PostToolUse** | AFTER Write/Edit | Validate result, can undo | ✅ Yes | stderr → Claude sees it |
+| **PermissionRequest** | BEFORE any tool use | Log all operations, block selectively | ✅ Yes | stderr → Claude sees it |
 | **Stop** | When Claude stops | Final checks before finishing | ✅ Yes | stderr → Claude sees it |
 | **SessionStart** | Conversation start | Re-inject rules into context | ❌ No | stdout → Claude context |
 
-**Key Distinction**: SessionStart's stdout goes into Claude's context (for reminders), all others use stderr for user feedback.
+**Key Distinctions**:
+- SessionStart's stdout goes into Claude's context (for reminders)
+- PermissionRequest fires for **every** tool (Read, Write, Edit, Bash, etc.), not just Write/Edit
+- All blocking hooks use stderr for user feedback
 
 ## File Structure
 
@@ -80,6 +84,7 @@ claude-code-enforcement/
 ├── templates/                   # Template stubs (copied to projects)
 │   ├── pre-write.sh            # PreToolUse template
 │   ├── post-write.sh           # PostToolUse template
+│   ├── permission-request.sh   # PermissionRequest template (logs all tools)
 │   ├── pre-stop.sh             # Stop hook template
 │   └── session-start.sh        # SessionStart template
 ├── examples/                    # Real-world implementations
@@ -96,9 +101,96 @@ claude-code-enforcement/
     └── hooks/
         ├── pre-write.sh       # Created by running bootstrap on itself
         ├── post-write.sh
+        ├── permission-request.sh  # Logs all tool uses
         ├── pre-stop.sh
         └── session-start.sh
 ```
+
+## Permission Logging (Learning Mode)
+
+**The system's killer feature**: Start permissive, log everything, build restrictions incrementally.
+
+### How It Works
+
+The `permission-request.sh` hook fires **before every tool Claude uses** (Read, Write, Edit, Bash, etc.):
+
+1. **Logs all activity** to `.claude/logs/permissions.log`:
+   ```
+   [2026-03-15 10:23:45] Bash | npm install | allow
+   [2026-03-15 10:24:12] Write | src/App.js | allow
+   [2026-03-15 10:25:33] Bash | go build | allow
+   ```
+
+2. **Blocks only specific violations** (starts with git push on Mac):
+   ```bash
+   if $IS_MAC && [[ "$TOOL_ARGS" =~ ^git\ push ]]; then
+     echo "❌ BLOCKED: git push on Mac" >&2
+     exit 2
+   fi
+   ```
+
+3. **You review logs** and add restrictions over time:
+   ```bash
+   # Review what Claude is trying:
+   tail -f .claude/logs/permissions.log
+
+   # Spot violations:
+   # - npm on Mac (not installed)
+   # - go on Mac (not installed)
+   # - Creating .js files (want TypeScript)
+
+   # Add deny rules to permission-request.sh or settings.json
+   ```
+
+### Built-In Blocks
+
+**Mac/Pi Workflow:** The template includes one pre-configured block:
+- **git push on Mac** → Blocked (user pushes manually)
+
+All other operations allowed by default (learning mode).
+
+### Log Location
+
+- **Path**: `.claude/logs/permissions.log`
+- **Format**: `[timestamp] ToolName | arguments | decision`
+- **Gitignored**: Yes (local only, not committed)
+
+### Converting Logs to Rules
+
+After reviewing logs, convert frequent violations to rules:
+
+**Option 1: Hook-based (flexible):**
+```bash
+# .claude/hooks/permission-request.sh
+if $IS_MAC && [[ "$TOOL_ARGS" =~ ^npm ]]; then
+  echo "❌ BLOCKED: npm not available on Mac" >&2
+  exit 2
+fi
+```
+
+**Option 2: Settings.json (declarative):**
+```json
+{
+  "permissions": {
+    "deny": ["Bash(npm *)", "Bash(go *)", "Write(*.js)"]
+  }
+}
+```
+
+### Why This Works
+
+Traditional approach (guess rules upfront):
+- ❌ Over-restrict (frustrating)
+- ❌ Under-restrict (defeats purpose)
+- ❌ Doesn't match real usage
+
+Learning mode (observe then enforce):
+- ✅ See actual Claude behavior first
+- ✅ Only block real violations
+- ✅ Zero false positives
+- ✅ Self-improving over time
+
+**Analogy**: Firewall learning mode - observe traffic before writing rules.
 
 ## Critical Technical Details
 

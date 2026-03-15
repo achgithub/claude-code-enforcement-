@@ -95,7 +95,22 @@ cat > "$CLAUDE_DIR/settings.json" <<'EOF'
           }
         ]
       }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/permission-request.sh"
+          }
+        ]
+      }
     ]
+  },
+  "permissions": {
+    "allow": [],
+    "ask": [],
+    "deny": []
   }
 }
 EOF
@@ -109,6 +124,7 @@ if [ -d "$TEMPLATES_DIR" ]; then
   cp "$TEMPLATES_DIR/post-write.sh" "$HOOKS_DIR/"
   cp "$TEMPLATES_DIR/pre-stop.sh" "$HOOKS_DIR/"
   cp "$TEMPLATES_DIR/session-start.sh" "$HOOKS_DIR/"
+  cp "$TEMPLATES_DIR/permission-request.sh" "$HOOKS_DIR/"
 else
   # Fallback: create inline templates
   echo "⚠️  Templates directory not found, creating inline templates"
@@ -234,6 +250,79 @@ echo "🚀 [SESSION-START] Enforcement system loading..." >&2
 echo "Enforcement hooks are active."
 echo "Customize rules in .claude/hooks/*.sh"
 HOOK_EOF
+
+  cat > "$HOOKS_DIR/permission-request.sh" <<'HOOK_EOF'
+#!/bin/bash
+# PermissionRequest Hook: Runs when Claude requests permission for ANY tool
+# This hook LOGS all tool requests and can selectively BLOCK operations
+# Exit 0 = allow, Exit 2 = block
+#
+# LEARNING MODE: This hook logs everything to help you build restrictions over time
+# Review the log, then convert frequent violations to deny rules in settings.json
+
+INPUT=$(cat)
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
+TOOL_ARGS=$(echo "$INPUT" | jq -r '.tool_args // empty')
+DECISION=$(echo "$INPUT" | jq -r '.decision // "unknown"')
+
+# ============================================================
+# LOGGING: Track all tool requests for review
+# ============================================================
+
+LOG_DIR="${CLAUDE_PROJECT_DIR:-$PWD}/.claude/logs"
+LOG_FILE="$LOG_DIR/permissions.log"
+
+# Create log directory if it doesn't exist
+mkdir -p "$LOG_DIR"
+
+# Log entry: timestamp | tool | args | decision
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+echo "[$TIMESTAMP] $TOOL_NAME | $TOOL_ARGS | $DECISION" >> "$LOG_FILE"
+
+# ============================================================
+# ENFORCEMENT RULES: Block specific operations
+# ============================================================
+
+# Detect if we're on Mac (editing machine)
+IS_MAC=false
+if [[ "$(uname)" == "Darwin" ]]; then
+  IS_MAC=true
+fi
+
+# Block git push on Mac (user pushes manually per workflow)
+if $IS_MAC && [[ "$TOOL_NAME" == "Bash" ]] && [[ "$TOOL_ARGS" =~ ^git\ push ]]; then
+  echo "❌ BLOCKED: git push on Mac" >&2
+  echo "   Mac/Pi workflow: User pushes manually" >&2
+  echo "   Commit locally, then push when ready" >&2
+  exit 2
+fi
+
+# ============================================================
+# ADD YOUR ENFORCEMENT RULES HERE
+# ============================================================
+#
+# Example: Block npm on Mac (no npm installed)
+# if $IS_MAC && [[ "$TOOL_NAME" == "Bash" ]] && [[ "$TOOL_ARGS" =~ ^npm ]]; then
+#   echo "❌ BLOCKED: npm not available on Mac" >&2
+#   echo "   Build/test on Pi after push" >&2
+#   exit 2
+# fi
+#
+# Example: Block go commands on Mac (no Go installed)
+# if $IS_MAC && [[ "$TOOL_NAME" == "Bash" ]] && [[ "$TOOL_ARGS" =~ ^go\ ]]; then
+#   echo "❌ BLOCKED: Go not available on Mac" >&2
+#   echo "   Build/test on Pi after push" >&2
+#   exit 2
+# fi
+#
+# Review log periodically:
+#   tail -f .claude/logs/permissions.log
+#
+# When you see violations, add rules above OR in settings.json permissions
+
+# Allow by default (learning mode)
+exit 0
+HOOK_EOF
 fi
 
 # Make hooks executable
@@ -324,6 +413,9 @@ EOF
 
 # Create .gitignore
 cat > "$CLAUDE_DIR/.gitignore" <<'EOF'
+# Logs are local - don't commit
+logs/
+
 # Commit hooks to share enforcement with team
 # Or uncomment to keep hooks private:
 # *

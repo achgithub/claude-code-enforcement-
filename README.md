@@ -229,6 +229,113 @@ fi
 
 ---
 
+## Learning Mode: Permission Logging
+
+**The killer feature** - Start permissive, log everything, build restrictions over time.
+
+### How It Works
+
+1. **PermissionRequest hook logs EVERY tool Claude uses**
+   - Location: `.claude/logs/permissions.log`
+   - Format: `[timestamp] ToolName | arguments | decision`
+   - No blocking by default (except git push on Mac)
+
+2. **Review the log periodically**
+   ```bash
+   tail -f .claude/logs/permissions.log
+   # Or review everything:
+   cat .claude/logs/permissions.log
+   ```
+
+3. **Spot violations you want to prevent**
+   ```
+   [2026-03-15 10:23:45] Bash | npm install | allow
+   [2026-03-15 10:24:12] Write | src/App.js | allow
+   [2026-03-15 10:25:33] Bash | go build | allow
+   ```
+
+4. **Convert to enforcement rules**
+
+   **Option A: Add to hook** (`.claude/hooks/permission-request.sh`)
+   ```bash
+   # Block npm on Mac (no npm installed)
+   if $IS_MAC && [[ "$TOOL_ARGS" =~ ^npm ]]; then
+     echo "❌ BLOCKED: npm not available on Mac" >&2
+     exit 2
+   fi
+   ```
+
+   **Option B: Add to settings.json permissions**
+   ```json
+   {
+     "permissions": {
+       "deny": [
+         "Bash(npm *)",
+         "Bash(go *)",
+         "Write(*.js)"
+       ]
+     }
+   }
+   ```
+
+5. **System improves over time**
+   - First week: Discover what Claude tries
+   - Second week: Add 3-5 deny rules
+   - Third week: Add 3-5 more
+   - Result: Tight enforcement built from real usage
+
+### Built-in Enforcement
+
+The system includes **one pre-configured block**:
+
+**Mac/Pi Workflow: Block git push on Mac**
+```bash
+# Automatically blocked in permission-request.sh
+if $IS_MAC && [[ "$TOOL_ARGS" =~ ^git\ push ]]; then
+  echo "❌ BLOCKED: git push on Mac" >&2
+  echo "   User pushes manually" >&2
+  exit 2
+fi
+```
+
+This prevents Claude from pushing to remote (user does it manually after review).
+
+### Why Learning Mode Works
+
+**Traditional approach (fail):**
+- Guess what rules you need upfront
+- Over-restrict (frustrating)
+- Under-restrict (defeats the purpose)
+
+**Learning mode (win):**
+- ✅ See actual Claude behavior first
+- ✅ Only block real violations
+- ✅ Builds organically over time
+- ✅ Zero false positives (you decide what's wrong)
+
+**Analogy:** It's like a firewall in learning mode - observe traffic first, then write rules.
+
+### Log Rotation
+
+Logs can grow large over time. Manage with:
+
+```bash
+# View recent entries
+tail -100 .claude/logs/permissions.log
+
+# Archive old logs
+mv .claude/logs/permissions.log .claude/logs/permissions-$(date +%Y%m).log
+
+# Or auto-rotate in permission-request.sh:
+if [ -f "$LOG_FILE" ] && [ $(wc -l < "$LOG_FILE") -gt 10000 ]; then
+  mv "$LOG_FILE" "$LOG_FILE.old"
+fi
+```
+
+Logs are `.gitignore`d by default (local only).
+
+---
+
 ## Real-World Use Cases
 
 ### Solo Developer with Mac/Pi Split
