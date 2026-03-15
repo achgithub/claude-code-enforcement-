@@ -157,25 +157,50 @@ All other operations allowed by default (learning mode).
 
 ### Converting Logs to Rules
 
-After reviewing logs, convert frequent violations to rules:
+After reviewing logs, convert violations to rules using **hooks** (recommended) or **settings.json**.
 
-**Option 1: Hook-based (flexible):**
+**Hooks vs Settings Comparison:**
+
+| Feature | Hooks (permission-request.sh) | settings.json |
+|---------|-------------------------------|---------------|
+| Conditional logic | ✅ Yes (if/then/else) | ❌ No (static patterns) |
+| Platform-specific | ✅ Block on Mac only | ❌ Blocks everywhere |
+| Changes take effect | Immediately | After restart |
+| Custom error messages | ✅ Yes | ❌ Generic |
+| Complexity | Bash scripting | Simple declarative |
+
+**Use hooks for platform-specific rules (Mac/Pi workflow):**
 ```bash
 # .claude/hooks/permission-request.sh
+
+# Block npm ONLY on Mac (not on Pi)
 if $IS_MAC && [[ "$TOOL_ARGS" =~ ^npm ]]; then
   echo "❌ BLOCKED: npm not available on Mac" >&2
+  echo "   Build/test on Pi after push" >&2
+  exit 2
+fi
+
+# Block go ONLY on Mac (not on Pi)
+if $IS_MAC && [[ "$TOOL_ARGS" =~ ^go\ ]]; then
+  echo "❌ BLOCKED: Go not available on Mac" >&2
   exit 2
 fi
 ```
 
-**Option 2: Settings.json (declarative):**
+**Use settings.json for simple, universal blocks:**
 ```json
 {
   "permissions": {
-    "deny": ["Bash(npm *)", "Bash(go *)", "Write(*.js)"]
+    "deny": [
+      "Write(*.js)",     // Block everywhere (no conditionals needed)
+      "Write(*.jsx)",    // Block everywhere
+      "Bash(curl *)"     // Block everywhere
+    ]
   }
 }
 ```
+
+**Recommendation:** Use hooks. Most real workflows need conditional logic (editing machine vs build server, different OS environments, context-specific rules).
 
 ### Why This Works
 

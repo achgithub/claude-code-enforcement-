@@ -256,27 +256,49 @@ fi
 
 4. **Convert to enforcement rules**
 
-   **Option A: Add to hook** (`.claude/hooks/permission-request.sh`)
+   ### Two Approaches: Hooks vs Settings
+
+   | Feature | Hooks (permission-request.sh) | settings.json permissions |
+   |---------|-------------------------------|---------------------------|
+   | **Power** | Conditional logic (if/then) | Static patterns only |
+   | **Platform-specific** | ✅ Block npm on Mac, allow on Pi | ❌ Blocks everywhere |
+   | **Changes** | Immediate (no restart) | Requires restart |
+   | **Complexity** | Bash scripting required | Simple declarative |
+   | **Error messages** | Custom, detailed | Generic |
+
+   **Use hooks when you need conditional logic:**
    ```bash
-   # Block npm on Mac (no npm installed)
+   # .claude/hooks/permission-request.sh
+
+   # Block npm ONLY on Mac (Mac/Pi workflow)
    if $IS_MAC && [[ "$TOOL_ARGS" =~ ^npm ]]; then
      echo "❌ BLOCKED: npm not available on Mac" >&2
+     echo "   Build/test on Pi after push" >&2
+     exit 2
+   fi
+
+   # Block go ONLY on Mac
+   if $IS_MAC && [[ "$TOOL_ARGS" =~ ^go\ ]]; then
+     echo "❌ BLOCKED: Go not available on Mac" >&2
      exit 2
    fi
    ```
 
-   **Option B: Add to settings.json permissions**
+   **Use settings.json for simple, universal blocks:**
    ```json
    {
      "permissions": {
        "deny": [
-         "Bash(npm *)",
-         "Bash(go *)",
-         "Write(*.js)"
+         "Write(*.js)",              // Block .js files everywhere
+         "Write(*.jsx)",             // Block .jsx files everywhere
+         "Bash(curl *)",             // Block curl everywhere
+         "WebFetch"                  // Block web fetching everywhere
        ]
      }
    }
    ```
+
+   **Most workflows need hooks** because platform-specific rules are common (editing machine vs build server).
 
 5. **System improves over time**
    - First week: Discover what Claude tries
