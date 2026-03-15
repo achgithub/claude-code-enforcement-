@@ -8,8 +8,22 @@
 
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
-TOOL_ARGS=$(echo "$INPUT" | jq -r '.tool_args // empty')
-DECISION=$(echo "$INPUT" | jq -r '.decision // "unknown"')
+
+# Extract tool-specific arguments from tool_input
+case "$TOOL_NAME" in
+  Bash)
+    TOOL_ARGS=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+    ;;
+  Write|Edit)
+    TOOL_ARGS=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+    ;;
+  Read)
+    TOOL_ARGS=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+    ;;
+  *)
+    TOOL_ARGS=$(echo "$INPUT" | jq -r '.tool_input | to_entries | map("\(.key)=\(.value)") | join(", ") // empty')
+    ;;
+esac
 
 # ============================================================
 # LOGGING: Track all tool requests for review
@@ -21,9 +35,9 @@ LOG_FILE="$LOG_DIR/permissions.log"
 # Create log directory if it doesn't exist
 mkdir -p "$LOG_DIR"
 
-# Log entry: timestamp | tool | args | decision
+# Log entry: timestamp | tool | args
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-echo "[$TIMESTAMP] $TOOL_NAME | $TOOL_ARGS | $DECISION" >> "$LOG_FILE"
+echo "[$TIMESTAMP] $TOOL_NAME | $TOOL_ARGS" >> "$LOG_FILE"
 
 # ============================================================
 # ENFORCEMENT RULES: Block specific operations
@@ -36,11 +50,14 @@ if [[ "$(uname)" == "Darwin" ]]; then
 fi
 
 # Block git push on Mac (user pushes manually per workflow)
-if $IS_MAC && [[ "$TOOL_NAME" == "Bash" ]] && [[ "$TOOL_ARGS" =~ ^git\ push ]]; then
-  echo "❌ BLOCKED: git push on Mac" >&2
-  echo "   Mac/Pi workflow: User pushes manually" >&2
-  echo "   Commit locally, then push when ready" >&2
-  exit 2
+if $IS_MAC && [[ "$TOOL_NAME" == "Bash" ]]; then
+  BASH_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+  if [[ "$BASH_CMD" =~ ^git\ push ]]; then
+    echo "❌ BLOCKED: git push on Mac" >&2
+    echo "   Mac/Pi workflow: User pushes manually" >&2
+    echo "   Commit locally, then push when ready" >&2
+    exit 2
+  fi
 fi
 
 # ============================================================

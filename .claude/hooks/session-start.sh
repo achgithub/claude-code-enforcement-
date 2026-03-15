@@ -6,28 +6,45 @@
 echo "🚀 [SESSION-START] Enforcement system loading..." >&2
 
 # ============================================================
-# ADD CONTEXT INJECTION HERE
+# INJECT ENFORCEMENT RULES INTO CONTEXT
 # ============================================================
-#
-# Example: Display critical rules (stdout → Claude's context)
-# cat <<'EOF'
-# ⚠️ CRITICAL PROJECT STANDARDS:
-# 1. No CSS files in src/ - use shared styles
-# 2. TypeScript only - no .js files
-# 3. Run tests before committing
-# EOF
-#
-# Example: Check environment dependencies
-# if ! command -v node &> /dev/null; then
-#   echo "⚠️  WARNING: Node.js not installed" >&2
-# fi
-#
-# Example: Display git branch info
-# if git rev-parse --git-dir > /dev/null 2>&1; then
-#   BRANCH=$(git branch --show-current 2>/dev/null)
-#   echo "📍 Current branch: $BRANCH" >&2
-# fi
+
+# Detect platform
+IS_MAC=false
+if [[ "$(uname)" == "Darwin" ]]; then
+  IS_MAC=true
+fi
 
 # Output to Claude's context (stdout):
-echo "Enforcement hooks are active."
-echo "Customize rules in .claude/hooks/*.sh"
+cat <<'EOF'
+
+## 🛡️ Enforcement System Active
+
+**Permission Logging:** All tool uses logged to `.claude/logs/permissions.log`
+- Review periodically: `tail -f .claude/logs/permissions.log`
+- Learning mode: Starts permissive, add deny rules over time
+
+**Active Blocking Rules:**
+EOF
+
+# Platform-specific rules
+if $IS_MAC; then
+  cat <<'EOF'
+- ❌ **git push** blocked on Mac (user pushes manually)
+
+**Mac/Pi Workflow:**
+1. Write code on Mac (this machine)
+2. Commit locally (Claude does this)
+3. User pushes manually
+4. Pull on Pi and build/test there
+EOF
+fi
+
+cat <<'EOF'
+
+**Add Custom Rules:**
+- Edit `.claude/hooks/permission-request.sh` for conditional logic
+- Or add to `.claude/settings.json` permissions.deny for simple blocks
+
+**Hook files:** `.claude/hooks/*.sh`
+EOF

@@ -356,28 +356,53 @@ HOOK_EOF
 #!/bin/bash
 # SessionStart Hook: Runs when Claude Code session starts
 # Output (stdout) gets injected into Claude's context
+# stderr goes to logs only
 
 echo "🚀 [SESSION-START] Enforcement system loading..." >&2
 
 # ============================================================
-# ADD CONTEXT INJECTION HERE
+# INJECT ENFORCEMENT RULES INTO CONTEXT
 # ============================================================
-#
-# Example: Display critical rules
-# cat <<'EOF'
-# ⚠️ PROJECT STANDARDS:
-# 1. Rule one
-# 2. Rule two
-# EOF
-#
-# Example: Check environment
-# if ! command -v node &> /dev/null; then
-#   echo "⚠️  WARNING: Node.js not installed" >&2
-# fi
 
-# Output goes into Claude's context (stdout):
-echo "Enforcement hooks are active."
-echo "Customize rules in .claude/hooks/*.sh"
+# Detect platform
+IS_MAC=false
+if [[ "$(uname)" == "Darwin" ]]; then
+  IS_MAC=true
+fi
+
+# Output to Claude's context (stdout):
+cat <<'EOF'
+
+## 🛡️ Enforcement System Active
+
+**Permission Logging:** All tool uses logged to `.claude/logs/permissions.log`
+- Review periodically: `tail -f .claude/logs/permissions.log`
+- Learning mode: Starts permissive, add deny rules over time
+
+**Active Blocking Rules:**
+EOF
+
+# Platform-specific rules
+if $IS_MAC; then
+  cat <<'EOF'
+- ❌ **git push** blocked on Mac (user pushes manually)
+
+**Mac/Pi Workflow:**
+1. Write code on Mac (this machine)
+2. Commit locally (Claude does this)
+3. User pushes manually
+4. Pull on Pi and build/test there
+EOF
+fi
+
+cat <<'EOF'
+
+**Add Custom Rules:**
+- Edit `.claude/hooks/permission-request.sh` for conditional logic
+- Or add to `.claude/settings.json` permissions.deny for simple blocks
+
+**Hook files:** `.claude/hooks/*.sh`
+EOF
 HOOK_EOF
 
   cat > "$HOOKS_DIR/permission-request.sh" <<'HOOK_EOF'
@@ -391,8 +416,22 @@ HOOK_EOF
 
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
-TOOL_ARGS=$(echo "$INPUT" | jq -r '.tool_args // empty')
-DECISION=$(echo "$INPUT" | jq -r '.decision // "unknown"')
+
+# Extract tool-specific arguments from tool_input
+case "$TOOL_NAME" in
+  Bash)
+    TOOL_ARGS=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+    ;;
+  Write|Edit)
+    TOOL_ARGS=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+    ;;
+  Read)
+    TOOL_ARGS=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+    ;;
+  *)
+    TOOL_ARGS=$(echo "$INPUT" | jq -r '.tool_input | to_entries | map("\(.key)=\(.value)") | join(", ") // empty')
+    ;;
+esac
 
 # ============================================================
 # LOGGING: Track all tool requests for review
@@ -404,9 +443,9 @@ LOG_FILE="$LOG_DIR/permissions.log"
 # Create log directory if it doesn't exist
 mkdir -p "$LOG_DIR"
 
-# Log entry: timestamp | tool | args | decision
+# Log entry: timestamp | tool | args
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-echo "[$TIMESTAMP] $TOOL_NAME | $TOOL_ARGS | $DECISION" >> "$LOG_FILE"
+echo "[$TIMESTAMP] $TOOL_NAME | $TOOL_ARGS" >> "$LOG_FILE"
 
 # ============================================================
 # ENFORCEMENT RULES: Block specific operations
@@ -419,11 +458,14 @@ if [[ "$(uname)" == "Darwin" ]]; then
 fi
 
 # Block git push on Mac (user pushes manually per workflow)
-if $IS_MAC && [[ "$TOOL_NAME" == "Bash" ]] && [[ "$TOOL_ARGS" =~ ^git\ push ]]; then
-  echo "❌ BLOCKED: git push on Mac" >&2
-  echo "   Mac/Pi workflow: User pushes manually" >&2
-  echo "   Commit locally, then push when ready" >&2
-  exit 2
+if $IS_MAC && [[ "$TOOL_NAME" == "Bash" ]]; then
+  BASH_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+  if [[ "$BASH_CMD" =~ ^git\ push ]]; then
+    echo "❌ BLOCKED: git push on Mac" >&2
+    echo "   Mac/Pi workflow: User pushes manually" >&2
+    echo "   Commit locally, then push when ready" >&2
+    exit 2
+  fi
 fi
 
 # ============================================================
@@ -431,17 +473,23 @@ fi
 # ============================================================
 #
 # Example: Block npm on Mac (no npm installed)
-# if $IS_MAC && [[ "$TOOL_NAME" == "Bash" ]] && [[ "$TOOL_ARGS" =~ ^npm ]]; then
-#   echo "❌ BLOCKED: npm not available on Mac" >&2
-#   echo "   Build/test on Pi after push" >&2
-#   exit 2
+# if $IS_MAC && [[ "$TOOL_NAME" == "Bash" ]]; then
+#   BASH_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+#   if [[ "$BASH_CMD" =~ ^npm ]]; then
+#     echo "❌ BLOCKED: npm not available on Mac" >&2
+#     echo "   Build/test on Pi after push" >&2
+#     exit 2
+#   fi
 # fi
 #
 # Example: Block go commands on Mac (no Go installed)
-# if $IS_MAC && [[ "$TOOL_NAME" == "Bash" ]] && [[ "$TOOL_ARGS" =~ ^go\ ]]; then
-#   echo "❌ BLOCKED: Go not available on Mac" >&2
-#   echo "   Build/test on Pi after push" >&2
-#   exit 2
+# if $IS_MAC && [[ "$TOOL_NAME" == "Bash" ]]; then
+#   BASH_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+#   if [[ "$BASH_CMD" =~ ^go\ ]]; then
+#     echo "❌ BLOCKED: Go not available on Mac" >&2
+#     echo "   Build/test on Pi after push" >&2
+#     exit 2
+#   fi
 # fi
 #
 # Review log periodically:
