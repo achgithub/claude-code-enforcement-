@@ -27,7 +27,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **Example Rules** (`examples/*.sh`)
    - Real-world rule implementations ready to copy-paste
    - Categories: TypeScript, CSS, workflow, security
-   - **NOTE**: Some examples use old argument-style (`$1 $2`) and need updating to JSON stdin format
+   - All examples use correct JSON stdin format
 
 ### Hook Data Flow (CRITICAL)
 
@@ -39,7 +39,7 @@ INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 
-# WRONG (old approach, still in some examples):
+# WRONG (deprecated - don't use):
 TOOL_NAME="$1"
 FILE_PATH="$2"
 ```
