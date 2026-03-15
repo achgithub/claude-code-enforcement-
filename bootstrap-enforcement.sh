@@ -60,7 +60,7 @@ cat > "$CLAUDE_DIR/settings.json" <<'EOF'
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-write.sh \"$TOOL_NAME\" \"$TOOL_ARGS_0\""
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-write.sh"
           }
         ]
       }
@@ -71,7 +71,7 @@ cat > "$CLAUDE_DIR/settings.json" <<'EOF'
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-write.sh \"$TOOL_NAME\" \"$TOOL_ARGS_0\""
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-write.sh"
           }
         ]
       }
@@ -119,8 +119,9 @@ else
 # Exit 0 = allow operation
 # Exit 2 = block operation (Claude gets feedback and must adjust)
 
-TOOL_NAME="$1"
-FILE_PATH="$2"
+INPUT=$(cat)
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 
 echo "🔍 [PRE-WRITE] Claude wants to $TOOL_NAME: $FILE_PATH" >&2
 
@@ -150,8 +151,9 @@ HOOK_EOF
 # Exit 0 = keep the write
 # Exit 2 = undo the write
 
-TOOL_NAME="$1"
-FILE_PATH="$2"
+INPUT=$(cat)
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 
 echo "📝 [POST-WRITE] Claude completed $TOOL_NAME: $FILE_PATH" >&2
 

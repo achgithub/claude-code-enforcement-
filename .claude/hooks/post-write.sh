@@ -38,5 +38,8 @@ echo "📝 [POST-WRITE] Claude completed $TOOL_NAME: $FILE_PATH" >&2
 #   fi
 # fi
 
+# DEBUG: Log to file to see if hook is running
+echo "[$(date)] POST-WRITE: $TOOL_NAME $FILE_PATH" >> /tmp/claude-hook-debug.log
+
 echo "✅ [POST-WRITE] Validation passed" >&2
 exit 0

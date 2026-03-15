@@ -45,14 +45,23 @@ bootstrap-enforcement.sh
 
 ### 3. Test It Works
 
-Ask Claude to edit a file. You should see:
-```
-🔍 [PRE-WRITE] Claude wants to Edit: some-file.tsx
-✅ [PRE-WRITE] No violations detected - allowing operation
-📝 [POST-WRITE] Claude completed Edit: some-file.tsx
+Add a test blocking rule to `.claude/hooks/pre-write.sh`:
+```bash
+# Temporary test - block all .txt files
+if [[ "$FILE_PATH" =~ \.txt$ ]]; then
+  echo "❌ BLOCKED: Test rule - no .txt files" >&2
+  exit 2
+fi
 ```
 
-If you see these messages → hooks are working!
+Ask Claude to create/edit a .txt file. You should see:
+```
+❌ BLOCKED: Test rule - no .txt files
+```
+
+If Claude is blocked → hooks are working! Remove the test rule afterward.
+
+**Note**: Success messages (exit 0) are logged but not shown to Claude. Only blocking messages (exit 2) appear as errors.
 
 ### 4. Add Your Rules
 
@@ -72,6 +81,23 @@ See `examples/` directory for complete rule implementations.
 
 ## How It Works
 
+### Hook Execution Flow
+
+1. **Claude attempts Write or Edit**
+2. **PreToolUse hook receives JSON via stdin**:
+   ```json
+   {"tool_name":"Write","tool_input":{"file_path":"/path/to/file.tsx","content":"..."}}
+   ```
+3. **Hook parses input and applies rules**:
+   ```bash
+   INPUT=$(cat)
+   TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
+   FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+   ```
+4. **Hook exits with code**:
+   - Exit 0 = Allow operation (logs success, continues silently)
+   - Exit 2 = Block operation (stderr → error message shown to Claude)
+
 ### The Hook Types
 
 | Hook | When It Runs | Purpose | Can Block? |
@@ -81,12 +107,14 @@ See `examples/` directory for complete rule implementations.
 | **Stop** | When Claude stops | Final checks | ✅ Yes |
 | **SessionStart** | Conversation start | Re-inject rules | ❌ No |
 
-### Exit Codes
+### Exit Codes & Output
 
-| Code | Meaning | Result |
-|------|---------|--------|
-| `0` | Success | Operation allowed/continues |
-| `2` | Block | Operation blocked, Claude gets feedback |
+| Code | Output Channel | Visibility | Purpose |
+|------|---------------|-----------|---------|
+| `0` | stderr | Hidden from Claude | Success logging |
+| `2` | stderr | **Shown to Claude** | Block with feedback |
+
+**Key insight**: Only blocking messages (exit 2) are visible to Claude as errors. Success messages are logged but not shown.
 
 ### Example: Blocking a Violation
 
@@ -244,8 +272,9 @@ echo "⚠️ Mac = Code only. Pi = Build/test."
 ```bash
 # .claude/hooks/pre-write.sh
 #!/bin/bash
-TOOL_NAME="$1"
-FILE_PATH="$2"
+INPUT=$(cat)
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 
 # Source multiple rule sets
 source "$(dirname "$0")/rules/typescript.sh"
@@ -272,15 +301,25 @@ fi
 
 ### Testing Hooks Manually
 
+Hooks receive JSON via stdin (not command-line arguments):
+
 ```bash
-# Test pre-write hook
-bash .claude/hooks/pre-write.sh Write src/App.css
+# Test pre-write hook with JSON input
+echo '{"tool_name":"Write","tool_input":{"file_path":"src/App.css"}}' | \
+  bash .claude/hooks/pre-write.sh
 echo $?  # 0 = allowed, 2 = blocked
 
-# Test with real file
-touch /tmp/test.css
-bash .claude/hooks/pre-write.sh Write /tmp/test.css
+# Test blocking rule
+echo '{"tool_name":"Edit","tool_input":{"file_path":"forbidden.js"}}' | \
+  bash .claude/hooks/pre-write.sh
 ```
+
+**Debug logging**: Add this before `exit 0` in your hooks:
+```bash
+echo "[$(date)] PRE-WRITE: $TOOL_NAME $FILE_PATH" >> /tmp/claude-hook-debug.log
+```
+
+Then check: `tail -f /tmp/claude-hook-debug.log`
 
 ---
 
@@ -313,10 +352,16 @@ A: Your choice. Commit to share with team, or add `.claude/` to `.gitignore`.
 
 ### Hooks Not Firing
 
-1. **Restart Claude Code** (required after installing)
-2. Check `.claude/settings.json` exists
+1. **Restart Claude Code** (required after installing `.claude/settings.json`)
+2. Check `.claude/settings.json` exists and has valid JSON syntax
 3. Check hooks are executable: `chmod +x .claude/hooks/*.sh`
-4. Test manually: `bash .claude/hooks/pre-write.sh Write test.txt`
+4. Add debug logging to hooks:
+   ```bash
+   echo "[$(date)] HOOK FIRED: $TOOL_NAME $FILE_PATH" >> /tmp/claude-hook-debug.log
+   ```
+5. Ask Claude to edit a file, then check: `cat /tmp/claude-hook-debug.log`
+6. If log exists → hooks are running (success messages just hidden from Claude)
+7. If no log → hooks not firing, check settings.json syntax
 
 ### Hook Blocks Incorrectly
 

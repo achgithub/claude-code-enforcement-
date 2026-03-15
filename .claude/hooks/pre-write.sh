@@ -31,5 +31,8 @@ echo "🔍 [PRE-WRITE] Claude wants to $TOOL_NAME: $FILE_PATH" >&2
 #   exit 2
 # fi
 
+# DEBUG: Log to file to see if hook is running
+echo "[$(date)] PRE-WRITE: $TOOL_NAME $FILE_PATH" >> /tmp/claude-hook-debug.log
+
 echo "✅ [PRE-WRITE] No violations detected - allowing operation" >&2
 exit 0
